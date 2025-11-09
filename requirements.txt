@@ -1,0 +1,8 @@
+fastapi==0.104.1 > requirements.txt
+uvicorn==0.24.0 >> requirements.txt
+python-dotenv==1.0.0 >> requirements.txt
+sqlalchemy==2.0.23 >> requirements.txt
+pymysql==1.1.0 >> requirements.txt
+python-jose==3.3.0 >> requirements.txt
+passlib==1.7.4 >> requirements.txt
+bcrypt==4.0.1 >> requirements.txt
