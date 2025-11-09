@@ -1,26 +1,30 @@
-from fastapi import FastAPI, HTTPException, status, Depends
+# main.py
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import hashlib
-import hmac
-import time
 import os
-from datetime import datetime, timedelta
-import json
-from jose import jwt
+import asyncio
+from threading import Thread
 
-# Убираем точки перед импортами - это неправильный синтаксис
+# ===== AIOGRAM BOT IMPORTS =====
+from aiogram import Bot, Dispatcher, Router, types
+from aiogram.filters import Command
+
+# ===== DATABASE IMPORTS =====
 try:
-    from app.database import get_db
+    from app.database import get_db, engine, Base
+    from app.models.user import User
     from app.repositories.user_repository import UserRepository
-    print("✅ Database imports successful")
+    
+    Base.metadata.create_all(bind=engine)
+    print("✅ Database connected")
 except ImportError as e:
-    print(f"❌ Database imports failed: {e}")
-    # Заглушки если импорты не работают
+    print(f"❌ Database error: {e}")
     get_db = None
     UserRepository = None
 
+# ===== FASTAPI APP =====
 app = FastAPI()
 
 app.add_middleware(
@@ -31,82 +35,127 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ===== TELEGRAM BOT =====
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+bot = Bot(token=TELEGRAM_TOKEN)
+dp = Dispatcher()
+router = Router()
+
+# ===== MODELS =====
 class TelegramUser(BaseModel):
     id: int
     first_name: str
     last_name: str = None
     username: str = None
+    language_code: str = None
+    is_premium: bool = False
+    is_bot: bool = False
 
-# ✅ Простые GET эндпоинты
+# ===== БОТ =====
+@router.message(Command("start"))
+async def start_command(message: types.Message):
+    """Обработчик команды /start"""
+    try:
+        user = message.from_user
+        
+        # СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ НАПРЯМУЮ В БД
+        if UserRepository:
+            user_data = {
+                "id": user.id,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "username": user.username,
+                "language_code": user.language_code,
+                "is_premium": getattr(user, 'is_premium', False),
+                "is_bot": user.is_bot
+            }
+            
+            # Используем БД напрямую из бота
+            from app.database import SessionLocal
+            db = SessionLocal()
+            try:
+                existing_user = await UserRepository.get_user_by_telegram_id(db, user.id)
+                if existing_user:
+                    await UserRepository.update_user_last_login(db, user.id)
+                else:
+                    await UserRepository.create_user(db, user_data)
+                db.commit()
+                print(f"✅ User {user.id} saved to DB")
+            except Exception as e:
+                print(f"❌ DB error: {e}")
+                db.rollback()
+            finally:
+                db.close()
+        
+        # Приветственное сообщение
+        welcome_text = f"""
+👋 Привет, {user.first_name}!
+
+Добро пожаловать в бот для вывоза мусора! 🗑️
+
+Используй /menu для главного меню
+        """
+        
+        await message.answer(welcome_text)
+        
+    except Exception as e:
+        print(f"Error in start: {e}")
+        await message.answer(f"Привет, {message.from_user.first_name}! 🎉")
+
+# ===== API =====
 @app.get("/")
 async def root():
-    return {"message": "API is working!"}
+    return {"message": "Bot + API working"}
 
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
 
-@app.get("/test")
-async def test():
-    return {"message": "Test works!"}
-
-@app.get("/api/auth/test")
-async def auth_test():
-    return {"message": "Auth test works!"}
-
-# ✅ Простой POST эндпоинт (без БД)
 @app.post("/api/auth/bot-start")
-async def bot_start(user: TelegramUser):
-    print(f"Received user: {user}")  # Для логов
-    return {
-        "success": True,
-        "message": f"Welcome {user.first_name}!",
-        "user": {
-            "telegram_id": user.id,
-            "first_name": user.first_name,
-            "username": user.username
-        },
-        "is_new_user": True
-    }
-
-# ✅ Эндпоинт с БД (если импорты работают)
-@app.post("/api/auth/bot-start-db")
-async def bot_start_db(user_data: TelegramUser, db: Session = Depends(get_db)):
-    """
-    Эндпоинт для обработки /start команды из бота с БД
-    """
+async def bot_start(user_data: TelegramUser, db: Session = Depends(get_db)):
+    """API для сохранения пользователя"""
     try:
-        if UserRepository is None:
-            raise HTTPException(status_code=500, detail="Database not configured")
-            
-        user, is_new = await UserRepository.get_or_create_user(db, user_data.dict())
+        if not UserRepository:
+            return {"success": False, "message": "DB not available"}
+        
+        clean_data = {k: v for k, v in user_data.dict().items() if v is not None}
+        
+        existing_user = await UserRepository.get_user_by_telegram_id(db, clean_data['id'])
+        
+        if existing_user:
+            await UserRepository.update_user_last_login(db, clean_data['id'])
+            is_new = False
+            user_obj = existing_user
+        else:
+            user_obj = await UserRepository.create_user(db, clean_data)
+            is_new = True
         
         return {
             "success": True,
-            "user": user.to_dict(),
-            "is_new_user": is_new,
-            "message": "Добро пожаловать! 👋" if is_new else "С возвращением! 🎉"
+            "user": user_obj.to_dict(),
+            "is_new_user": is_new
         }
         
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# ✅ Простой тест БД
-@app.get("/api/auth/db-test")
-async def db_test(db: Session = Depends(get_db)):
+# ===== ЗАПУСК БОТА =====
+async def start_bot():
     try:
-        if UserRepository is None:
-            return {"success": False, "message": "Database not available"}
-        
-        # Просто проверяем что БД работает
-        user_count = db.execute("SELECT 1 as test").fetchone()
-        return {
-            "success": True, 
-            "message": "Database is working!",
-            "test_result": user_count
-        }
+        dp.include_router(router)
+        print("🤖 Bot starting...")
+        await dp.start_polling(bot)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        print(f"❌ Bot failed: {e}")
+
+def run_bot():
+    asyncio.run(start_bot())
+
+@app.on_event("startup")
+async def startup():
+    print("🚀 Server starting...")
+    bot_thread = Thread(target=run_bot, daemon=True)
+    bot_thread.start()
 
 if __name__ == "__main__":
     import uvicorn

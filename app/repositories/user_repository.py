@@ -11,7 +11,14 @@ class UserRepository:
     
     @staticmethod
     async def create_user(db: Session, user_data: dict):
-        user = User(**user_data)
+        # Очищаем данные от None значений
+        clean_data = {k: v for k, v in user_data.items() if v is not None}
+        
+        # Обязательные поля
+        if 'telegram_id' not in clean_data:
+            clean_data['telegram_id'] = clean_data['id']
+        
+        user = User(**clean_data)
         db.add(user)
         db.commit()
         db.refresh(user)
