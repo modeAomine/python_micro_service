@@ -1,16 +1,12 @@
 # main.py
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer
-from dotenv import load_dotenv
 import os
 import sys
 
 # Добавляем путь для импортов
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
-
-load_dotenv()
 
 app = FastAPI(
     title="Telegram Mini App Auth API",
@@ -27,22 +23,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ПРОСТОЙ ТЕСТОВЫЙ РОУТЕР БЕЗ ИМПОРТОВ
-from fastapi import APIRouter
+# Импортируем и инициализируем БД
+try:
+    from app.database import engine, Base
+    from app.models.user import User
+    Base.metadata.create_all(bind=engine)
+    print("✅ Database tables created")
+except Exception as e:
+    print(f"⚠️ Database setup: {e}")
 
-test_router = APIRouter()
+# Импортируем роутеры
+try:
+    from app.auth.router import router as auth_router
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+    print("✅ Auth router loaded")
+except ImportError as e:
+    print(f"❌ Auth router: {e}")
 
-@app.get("/test")
-async def test():
-    return {"message": "✅ Server is working!"}
-
-@app.post("/test-post")
-async def test_post(data: dict):
-    return {"message": "✅ POST is working!", "received": data}
-
-app.include_router(test_router, prefix="/api/auth", tags=["auth"])
-
-# Основные роуты
 @app.get("/")
 async def root():
     return {"message": "Telegram Mini App Auth API"}
@@ -51,15 +48,6 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-# УБИРАЕМ MANGUM ДЛЯ ТЕСТА
-# from mangum import Mangum
-# handler = Mangum(app)
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        app,
-        host="0.0.0.0", 
-        port=8000,
-        reload=True if os.getenv("ENV") == "development" else False
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000)
