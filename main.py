@@ -32,11 +32,11 @@ from fastapi import APIRouter
 
 test_router = APIRouter()
 
-@test_router.get("/test")
+@app.get("/test")
 async def test():
     return {"message": "✅ Server is working!"}
 
-@test_router.post("/test-post")
+@app.post("/test-post")
 async def test_post(data: dict):
     return {"message": "✅ POST is working!", "received": data}
 
