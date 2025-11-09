@@ -1,0 +1,21 @@
+{
+  "name": "telegram-miniapp-backend",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "python main.py",
+    "start": "python main.py",
+    "vercel-build": "echo 'No build needed for Python'"
+  },
+  "dependencies": {
+    "fastapi": "^0.104.1",
+    "uvicorn": "^0.24.0",
+    "sqlalchemy": "^2.0.23",
+    "pymysql": "^1.1.0",
+    "python-dotenv": "^1.0.0",
+    "python-jose": "^3.3.0",
+    "cryptography": "^41.0.7"
+  },
+  "devDependencies": {
+    "vercel": "^28.18.4"
+  }
+}

@@ -1,11 +1,13 @@
+# main.py
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from dotenv import load_dotenv
 import os
+import sys
 
-# ИСПРАВЛЕННЫЕ ИМПОРТЫ
-from app.auth.router import router as auth_router
+# Добавляем текущую директорию в путь для импортов
+sys.path.append(os.path.dirname(__file__))
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -19,14 +21,18 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "https://v40dwu-46-159-247-240.ru.tuna.am"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Роутеры
-app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+# Импортируем роутеры после инициализации app
+try:
+    from app.auth.router import router as auth_router
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+except ImportError as e:
+    print(f"Warning: Could not import routers: {e}")
 
 security = HTTPBearer()
 
@@ -37,6 +43,10 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+# Handler для Vercel
+from mangum import Mangum
+handler = Mangum(app)
 
 if __name__ == "__main__":
     import uvicorn
