@@ -6,8 +6,9 @@ from dotenv import load_dotenv
 import os
 import sys
 
-# Добавляем текущую директорию в путь для импортов
-sys.path.append(os.path.dirname(__file__))
+# Добавляем путь для импортов - ФИКС
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -27,12 +28,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Импортируем роутеры после инициализации app
+# Импортируем роутеры - ФИКС ИМПОРТОВ
 try:
-    from app.auth.router import router as auth_router
+    # Пробуем разные пути импорта
+    try:
+        from app.auth.router import router as auth_router
+        print("✅ Import from app.auth.router successful")
+    except ImportError:
+        from auth.router import router as auth_router  
+        print("✅ Import from auth.router successful")
+    
     app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+    print("✅ Auth router included")
+    
 except ImportError as e:
-    print(f"Warning: Could not import routers: {e}")
+    print(f"❌ Could not import routers: {e}")
+    # Создаем базовый роутер если импорт не удался
+    from fastapi import APIRouter
+    auth_router = APIRouter()
+    
+    @auth_router.get("/test")
+    async def test():
+        return {"message": "Test route working"}
+    
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 
 security = HTTPBearer()
 
@@ -44,14 +63,27 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
+@app.get("/test-imports")
+async def test_imports():
+    """Тестовый эндпоинт для проверки импортов"""
+    try:
+        from app.auth.router import router
+        return {"import_status": "success", "message": "All imports working"}
+    except ImportError as e:
+        return {"import_status": "failed", "error": str(e)}
+
 # Handler для Vercel
-from mangum import Mangum
-handler = Mangum(app)
+try:
+    from mangum import Mangum
+    handler = Mangum(app)
+    print("✅ Mangum handler created")
+except ImportError as e:
+    print(f"❌ Mangum import failed: {e}")
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
+        app,  # ФИКС: передаем app напрямую
         host="0.0.0.0",
         port=8000,
         reload=True if os.getenv("ENV") == "development" else False
